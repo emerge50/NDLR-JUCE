@@ -1,0 +1,20 @@
+{
+    "cmake.sourceDirectory": "${workspaceFolder}",
+    "cmake.buildDirectory": "${workspaceFolder}/build",
+    "cmake.configureSettings": {
+        "JUCE_DIR": "/Applications/JUCE",
+        "BUILD_TESTING": "ON"
+    },
+    "cmake.buildType": "Debug",
+    "C_Cpp.default.compileCommands": "${workspaceFolder}/build/compile_commands.json",
+    "C_Cpp.default.includePath": [
+        "${workspaceFolder}/Source",
+        "${workspaceFolder}/build/NDLR_artefacts/JuceLibraryCode",
+        "${workspaceFolder}/build/juce_binarydata_NDLRDefaultLayout/JuceLibraryCode",
+        "/Applications/JUCE/modules"
+    ],
+    "C_Cpp.default.cppStandard": "c++17",
+    "files.associations": {
+        "*.h": "cpp"
+    }
+}
