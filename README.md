@@ -2,6 +2,14 @@
 
 Portage progressif du projet NDLR Max vers JUCE.
 
+![Interface de NDLR](docs/images/ndlr-ui.png)
+
+## Télécharger
+
+Les binaires macOS Universal 2 pour Apple Silicon et Intel (Standalone, Audio
+Unit et VST3) sont disponibles dans la
+[dernière release GitHub](https://github.com/emerge50/NDLR-JUCE/releases/latest).
+
 ## Configuration
 
 - JUCE 8 dans `/Applications/JUCE`
