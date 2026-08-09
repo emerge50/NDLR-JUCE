@@ -1,4 +1,5 @@
 #include "PluginProcessor.h"
+#include "Engine/HarmonyData.h"
 #include "Engine/PatternUtilities.h"
 #include "PluginEditor.h"
 #include "Engine/TimingUtilities.h"
@@ -13,7 +14,9 @@ constexpr auto currentModDestinationOrderVersion = 2;
 constexpr auto lfoRateUnitProperty = "lfoRateUnitVersion";
 constexpr auto currentLfoRateUnitVersion = 1;
 constexpr auto padInversionModeProperty = "padInversionModeVersion";
-constexpr auto currentPadInversionModeVersion = 1;
+constexpr auto currentPadInversionModeVersion = 2;
+constexpr auto padVoicingProperty = "padVoicingVersion";
+constexpr auto currentPadVoicingVersion = 1;
 constexpr auto minimumLfoRateHz = 0.01f;
 constexpr auto maximumLfoRateHz = 20.0f;
 constexpr auto defaultLfoRateHz = 1.0f;
@@ -55,6 +58,8 @@ NdlrAudioProcessor::NdlrAudioProcessor()
                                   currentLfoRateUnitVersion, nullptr);
     parameters.state.setProperty (padInversionModeProperty,
                                   currentPadInversionModeVersion, nullptr);
+    parameters.state.setProperty (padVoicingProperty,
+                                  currentPadVoicingVersion, nullptr);
     cacheParameterPointers();
     startTimerHz (30);
 }
@@ -120,6 +125,14 @@ bool NdlrAudioProcessor::getModulationPatternValues (
 juce::AudioProcessorValueTreeState::ParameterLayout NdlrAudioProcessor::createParameterLayout()
 {
     juce::AudioProcessorValueTreeState::ParameterLayout layout;
+    juce::StringArray harmonyScaleNames;
+    juce::StringArray harmonyColourNames;
+    juce::StringArray padVoicingNames;
+    juce::StringArray padInversionNames;
+    for (const auto* name : ndlr::harmony::scaleNames) harmonyScaleNames.add (name);
+    for (const auto* name : ndlr::harmony::colourNames) harmonyColourNames.add (name);
+    for (const auto* name : ndlr::harmony::padVoicingNames) padVoicingNames.add (name);
+    for (const auto* name : ndlr::harmony::padInversionNames) padInversionNames.add (name);
     layout.add (std::make_unique<juce::AudioParameterBool> (
         juce::ParameterID { "transport.play", 1 }, "Internal Transport Play", false));
     layout.add (std::make_unique<juce::AudioParameterFloat> (
@@ -130,17 +143,12 @@ juce::AudioProcessorValueTreeState::ParameterLayout NdlrAudioProcessor::createPa
         juce::StringArray { "C", "G", "D", "A", "E", "B", "F#", "Db", "Ab", "Eb", "Bb", "F" }, 0));
     layout.add (std::make_unique<juce::AudioParameterChoice> (
         juce::ParameterID { "harmony.scale", 1 }, "Harmony Scales",
-        juce::StringArray { "Major", "Dorian", "Phrygian", "Lydian", "Mixolydian", "Minor", "Locrian",
-                            "Gypsy Min", "Harm. Minor", "Minor Penta", "Whole Tone", "Tonic 2nds",
-                            "Tonic 3rds", "Tonic 4ths", "Tonic 6ths", "Major Penta", "Blues",
-                            "Melodic Min", "Dorian b2", "Lydian Aug", "Lydian Dom", "Mixo b6",
-                            "Locrian #2", "Altered", "Phryg. Dom", "Byzantine", "Dim H-W", "Augmented" }, 0));
+        harmonyScaleNames, 0));
     layout.add (std::make_unique<juce::AudioParameterInt> (
         juce::ParameterID { "harmony.degree", 1 }, "Harmony Degree", 1, 7, 1));
     layout.add (std::make_unique<juce::AudioParameterChoice> (
         juce::ParameterID { "harmony.type", 1 }, "Harmony Colors",
-        juce::StringArray { "Triad", "7th", "sus2", "sus4", "6th", "mu", "add9", "9th", "quartal",
-                            "power", "shell", "quintal", "11th", "13th", "cluster", "shell9", "open9", "So What" }, 0));
+        harmonyColourNames, 0));
     layout.add (std::make_unique<juce::AudioParameterInt> (
         juce::ParameterID { "harmony.keyMidiChannel", 1 }, "Key MIDI Input Channel", 1, 16, 1));
     layout.add (std::make_unique<juce::AudioParameterInt> (
@@ -342,20 +350,20 @@ juce::AudioProcessorValueTreeState::ParameterLayout NdlrAudioProcessor::createPa
     layout.add (std::make_unique<juce::AudioParameterInt> (juce::ParameterID { "drone.velocity", 1 }, "Drone Velocity", 1, 127, 90));
     layout.add (std::make_unique<juce::AudioParameterInt> (juce::ParameterID { "drone.channel", 1 }, "Drone MIDI Channel", 1, 16, 2));
     layout.add (std::make_unique<juce::AudioParameterBool> (juce::ParameterID { "pad.on", 1 }, "Pad On", false));
-    layout.add (std::make_unique<juce::AudioParameterInt> (juce::ParameterID { "pad.position", 1 }, "Pad Position", 0, 100, 50));
-    layout.add (std::make_unique<juce::AudioParameterInt> (juce::ParameterID { "pad.range", 1 }, "Pad Range", 1, 22, 13));
-    layout.add (std::make_unique<juce::AudioParameterInt> (juce::ParameterID { "pad.spread", 1 }, "Pad Spread", 1, 6, 4));
+    layout.add (std::make_unique<juce::AudioParameterChoice> (
+        juce::ParameterID { "pad.voicing", 1 }, "Pad Voicing", padVoicingNames, 0));
+    layout.add (std::make_unique<juce::AudioParameterChoice> (
+        juce::ParameterID { "pad.register", 1 }, "Pad Register",
+        juce::StringArray { "-2", "-1", "0", "+1", "+2" }, 2));
     layout.add (std::make_unique<juce::AudioParameterInt> (juce::ParameterID { "pad.velocity", 1 }, "Pad Velocity", 1, 127, 100));
     layout.add (std::make_unique<juce::AudioParameterInt> (juce::ParameterID { "pad.channel", 1 }, "Pad MIDI Channel", 1, 16, 1));
     layout.add (std::make_unique<juce::AudioParameterBool> (juce::ParameterID { "pad.strum", 1 }, "Pad Strum", false));
     layout.add (std::make_unique<juce::AudioParameterChoice> (juce::ParameterID { "pad.strumDivision", 1 }, "Pad Strum Division",
         juce::StringArray { "1nd","1n","1nt","2nd","2n","2nt","4nd","4n","4nt","8nd","8n","8nt","16nd","16n","16nt","32nd","32n","32nt","64nd","64n","128n" }, 16));
     layout.add (std::make_unique<juce::AudioParameterBool> (juce::ParameterID { "pad.group", 1 }, "Pad Strum Group", false));
-    layout.add (std::make_unique<juce::AudioParameterInt> (juce::ParameterID { "pad.polyChain", 1 }, "Pad Poly Chain", 1, 4, 1));
-    layout.add (std::make_unique<juce::AudioParameterBool> (juce::ParameterID { "pad.invert", 1 }, "Pad Chord Invert", false));
     layout.add (std::make_unique<juce::AudioParameterChoice> (
         juce::ParameterID { "pad.inversionMode", 1 }, "Pad Chord Inversion Mode",
-        juce::StringArray { "ROOT", "1ST", "2ND", "AUTO" }, 0));
+        padInversionNames, 0));
     layout.add (std::make_unique<juce::AudioParameterChoice> (juce::ParameterID { "pad.quantize", 1 }, "Pad Quantize", juce::StringArray { "Off", "1/4", "1/8" }, 0));
     layout.add (std::make_unique<juce::AudioParameterBool> (juce::ParameterID { "perlin.on", 1 }, "Perlin On", false));
     layout.add (std::make_unique<juce::AudioParameterBool> (juce::ParameterID { "perlin.m1", 1 }, "Perlin Motif 1", true));
@@ -413,7 +421,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout NdlrAudioProcessor::createPa
     const juce::StringArray modDestinations {
         "None",
         "Key", "Scales", "Degree", "Colors",
-        "Pad On", "Pad Position", "Pad Range", "Pad Spread", "Pad Strum", "Pad Velocity",
+        "Pad On", "Pad Register", "Pad Inversion", "Pad Voicing", "Pad Strum", "Pad Velocity",
         "Drone On", "Drone Position", "Drone Type", "Drone Trigger", "Drone Velocity",
         "M1 On", "M1 Register", "M1 Pattern", "M1 Active Pattern", "M1 Length", "M1 Variation",
         "M1 Division", "M1 Velocity", "M1 Gate", "M1 Accent", "M1 Rhythm",
@@ -533,11 +541,10 @@ void NdlrAudioProcessor::cacheParameterPointers()
     droneOn = get ("drone.on"); dronePosition = get ("drone.position");
     droneType = get ("drone.type"); droneTrigger = get ("drone.trigger");
     droneVelocity = get ("drone.velocity"); droneChannel = get ("drone.channel");
-    padOn = get ("pad.on"); padPosition = get ("pad.position"); padRange = get ("pad.range");
-    padSpread = get ("pad.spread"); padVelocity = get ("pad.velocity"); padChannel = get ("pad.channel");
+    padOn = get ("pad.on"); padVoicing = get ("pad.voicing"); padRegister = get ("pad.register");
+    padVelocity = get ("pad.velocity"); padChannel = get ("pad.channel");
     padStrum = get ("pad.strum"); padStrumDivision = get ("pad.strumDivision");
-    padGroup = get ("pad.group"); padPolyChain = get ("pad.polyChain");
-    padInvert = get ("pad.invert"); padInversionMode = get ("pad.inversionMode");
+    padGroup = get ("pad.group"); padInversionMode = get ("pad.inversionMode");
     padQuantize = get ("pad.quantize");
     perlinOn = get ("perlin.on"); perlinM1 = get ("perlin.m1"); perlinM2 = get ("perlin.m2");
     perlinSeed = get ("perlin.seed"); perlinX = get ("perlin.x"); perlinY = get ("perlin.y");
@@ -573,10 +580,31 @@ void NdlrAudioProcessor::migrateStateTree (juce::ValueTree& state)
         state.getProperty (padInversionModeProperty, 0));
     if (savedPadInversionModeVersion < currentPadInversionModeVersion)
     {
-        const auto legacyInvert = readStateParameter (state, "pad.invert", 0.0f) >= 0.5f;
-        writeStateParameter (state, "pad.inversionMode", legacyInvert ? 3.0f : 0.0f);
+        auto inversion = juce::roundToInt (
+            readStateParameter (state, "pad.inversionMode", 0.0f));
+        if (savedPadInversionModeVersion < 1
+            && readStateParameter (state, "pad.invert", 0.0f) >= 0.5f)
+            inversion = 3;
+        // L'ancien mode AUTO n'a pas d'équivalent dans les profils Scaler.
+        if (inversion == 3)
+            inversion = 0;
+        writeStateParameter (state, "pad.inversionMode",
+                             static_cast<float> (juce::jlimit (0, 6, inversion)));
         state.setProperty (padInversionModeProperty,
                            currentPadInversionModeVersion, nullptr);
+    }
+
+    const auto savedPadVoicingVersion = static_cast<int> (
+        state.getProperty (padVoicingProperty, 0));
+    if (savedPadVoicingVersion < currentPadVoicingVersion)
+    {
+        static constexpr std::array<int, 6> legacySpreadToVoicing { 0, 3, 2, 1, 3, 2 };
+        const auto spread = juce::jlimit (1, 6, juce::roundToInt (
+            readStateParameter (state, "pad.spread", 1.0f)));
+        writeStateParameter (state, "pad.voicing",
+            static_cast<float> (legacySpreadToVoicing[static_cast<size_t> (spread - 1)]));
+        writeStateParameter (state, "pad.register", 2.0f);
+        state.setProperty (padVoicingProperty, currentPadVoicingVersion, nullptr);
     }
 
     // Jusqu'ici, le rate libre etait sauvegarde comme une periode en secondes.
@@ -608,8 +636,8 @@ void NdlrAudioProcessor::migrateStateTree (juce::ValueTree& state)
     {
         static constexpr std::array<int, 36> legacyToCurrent {
             0, 1, 2, 3, 4,
-            ndlr::modulation::padPosition, ndlr::modulation::padRange,
-            ndlr::modulation::padSpread, ndlr::modulation::padStrum,
+            ndlr::modulation::padRegister, ndlr::modulation::padInversion,
+            ndlr::modulation::padVoicing, ndlr::modulation::padStrum,
             ndlr::modulation::dronePosition, ndlr::modulation::droneType,
             ndlr::modulation::droneTrigger,
             ndlr::modulation::motif1Position, ndlr::modulation::motif1Pattern,
@@ -898,12 +926,13 @@ void NdlrAudioProcessor::processBlock (juce::AudioBuffer<float>& audio,
         juce::roundToInt (droneType->load()), juce::roundToInt (droneTrigger->load()),
         juce::roundToInt (droneVelocity->load()), juce::roundToInt (droneChannel->load()) };
     NdlrEngine::PadSettings padSettings {
-        padOn->load() >= 0.5f, juce::roundToInt (padPosition->load()), juce::roundToInt (padRange->load()),
-        juce::roundToInt (padSpread->load()), juce::roundToInt (padVelocity->load()),
-        juce::roundToInt (padChannel->load()), padStrum->load() >= 0.5f,
-        juce::roundToInt (padStrumDivision->load()), padGroup->load() >= 0.5f,
-        juce::roundToInt (padPolyChain->load()),
-        juce::jlimit (0, 3, juce::roundToInt (padInversionMode->load())),
+        padOn->load() >= 0.5f,
+        juce::roundToInt (padVoicing->load()),
+        juce::jlimit (0, 6, juce::roundToInt (padInversionMode->load())),
+        juce::roundToInt (padRegister->load()) - 2,
+        juce::roundToInt (padVelocity->load()), juce::roundToInt (padChannel->load()),
+        padStrum->load() >= 0.5f, juce::roundToInt (padStrumDivision->load()),
+        padGroup->load() >= 0.5f,
         juce::roundToInt (padQuantize->load()) };
 
     NdlrEngine::HarmonySettings harmonySettings {
@@ -1243,20 +1272,24 @@ void NdlrAudioProcessor::processBlock (juce::AudioBuffer<float>& audio,
             case ndlr::modulation::harmonyKey:
                 harmonySettings.root = m (harmonySettings.root, 0, 11); break;
             case ndlr::modulation::harmonyMode:
-                harmonySettings.scale = m (harmonySettings.scale, 0, 27); break;
+                harmonySettings.scale = m (
+                    harmonySettings.scale, 0,
+                    static_cast<int> (ndlr::harmony::scales.size()) - 1); break;
             case ndlr::modulation::harmonyDegree:
                 harmonySettings.degree = m (harmonySettings.degree, 0, 6); break;
             case ndlr::modulation::harmonyChordType:
-                harmonySettings.chordType = m (harmonySettings.chordType, 0, 17); break;
+                harmonySettings.chordType = m (
+                    harmonySettings.chordType, 0,
+                    static_cast<int> (ndlr::harmony::colourNames.size()) - 1); break;
 
             case ndlr::modulation::padOn:
                 padSettings.enabled = m (padSettings.enabled ? 1 : 0, 0, 1) > 0; break;
-            case ndlr::modulation::padPosition:
-                padSettings.position = m (padSettings.position, 0, 100); break;
-            case ndlr::modulation::padRange:
-                padSettings.range = m (padSettings.range, 1, 22); break;
-            case ndlr::modulation::padSpread:
-                padSettings.spread = m (padSettings.spread, 1, 6); break;
+            case ndlr::modulation::padRegister:
+                padSettings.registerOctaves = m (padSettings.registerOctaves, -2, 2); break;
+            case ndlr::modulation::padInversion:
+                padSettings.inversion = m (padSettings.inversion, 0, 6); break;
+            case ndlr::modulation::padVoicing:
+                padSettings.voicing = m (padSettings.voicing, 0, 11); break;
             case ndlr::modulation::padStrum:
                 padSettings.strumDivision = m (padSettings.strumDivision, 0, 20); break;
             case ndlr::modulation::padVelocity:

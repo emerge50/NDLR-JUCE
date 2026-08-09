@@ -73,7 +73,7 @@ private:
         };
         note = juce::jlimit (0, 127, note);
         return juce::String (names[static_cast<size_t> (note % 12)])
-             + juce::String (note / 12 - 1);
+             + juce::String (note / 12 - 2);
     }
 
     static void drawSummary (juce::Graphics& g, juce::Rectangle<float> bounds,
@@ -321,10 +321,11 @@ struct PadVoicingControlState
     bool enabled = false;
     bool strum = false;
     bool group = false;
-    juce::String inversionMode { "ROOT" };
+    juce::String voicing { "None" };
+    juce::String inversion { "No Inversion" };
+    int registerOctaves = 0;
     int velocity = 100;
     int midiChannel = 1;
-    int polyChain = 1;
     juce::String strumDivision { "16n" };
     juce::String quantize { "Off" };
 };
@@ -407,14 +408,10 @@ public:
         repaint();
     }
 
-    void setData (const NdlrEngine::PadVoicing& newVoicing, int newPosition,
-                  int newRange, int newSpread, juce::String newHarmony,
+    void setData (const NdlrEngine::PadVoicing& newVoicing, juce::String newHarmony,
                   PadVoicingControlState newControls)
     {
         voicing = newVoicing;
-        position = newPosition;
-        range = newRange;
-        spread = newSpread;
         harmony = std::move (newHarmony);
         controls = std::move (newControls);
         repaint();
@@ -455,16 +452,15 @@ public:
         drawToggle (g, takeCell (row1, 4), "PAD", controls.enabled);
         drawValue (g, takeCell (row1, 3), "VELOCITY", juce::String (controls.velocity));
         drawValue (g, takeCell (row1, 2), "MIDI", juce::String (controls.midiChannel));
-        drawValue (g, row1, "POLY", juce::String (controls.polyChain));
+        drawValue (g, row1, "REGISTER", juce::String (controls.registerOctaves));
 
         area.removeFromTop (2.0f);
         auto row2 = area.removeFromTop (27.0f);
-        const auto cellWidth = row2.getWidth() / 5.0f;
+        const auto cellWidth = row2.getWidth() / 4.0f;
         drawToggle (g, row2.removeFromLeft (cellWidth), "STRUM", controls.strum);
         drawValue (g, row2.removeFromLeft (cellWidth), "DIV", controls.strumDivision);
-        drawToggle (g, row2.removeFromLeft (cellWidth), "GROUP", controls.group);
-        drawValue (g, row2.removeFromLeft (cellWidth), "INV", controls.inversionMode);
-        drawValue (g, row2, "QUANTIZE", controls.quantize);
+        drawValue (g, row2.removeFromLeft (cellWidth), "VOICING", controls.voicing);
+        drawValue (g, row2, "INV", controls.inversion);
     }
 
     void mouseDown (const juce::MouseEvent& event) override
@@ -585,7 +581,7 @@ private:
         };
         note = juce::jlimit (0, 127, note);
         return juce::String (names[static_cast<size_t> (note % 12)])
-             + juce::String (note / 12 - 1);
+             + juce::String (note / 12 - 2);
     }
 
     static void drawChip (juce::Graphics& g, juce::Rectangle<float> bounds,
@@ -673,15 +669,8 @@ private:
         lastRangeLeftX = -1000.0f;
         lastRangeRightX = -1000.0f;
 
-        const auto polyChainCount = juce::jlimit (1, 4, controls.polyChain);
-        const auto firstMidiChannel = juce::jlimit (1, 16, controls.midiChannel);
-        const std::array<juce::Colour, 4> channelColours {
-            green, cyan, orange, muted
-        };
-        const auto midiChannelForSlot = [firstMidiChannel] (int slot)
-        {
-            return (firstMidiChannel - 1 + slot) % 16 + 1;
-        };
+        static constexpr auto polyChainCount = 1;
+        const std::array<juce::Colour, 1> channelColours { green };
 
         const auto drawReadout = [&] (juce::Rectangle<float> cell, juce::Colour accent,
                                       const juce::String& label, const juce::String& value)
@@ -702,43 +691,16 @@ private:
             }
         };
 
-        const auto readoutWidth = juce::jmin (105.0f, readouts.getWidth() / 3.7f);
-        drawReadout (readouts.removeFromLeft (readoutWidth), orange, "POS", juce::String (position));
-        drawReadout (readouts.removeFromLeft (readoutWidth), cyan, "RANGE", juce::String (range));
-        if (! embedded)
-            drawReadout (readouts.removeFromLeft (readoutWidth), green, "SPREAD",
-                         juce::String (spread));
-
-        // Keep the legend tied to the same round-robin channel allocation as
-        // NdlrEngine::updatePadVoicing(). This also makes channel 16 -> 1 wrap
-        // visible when a Poly Chain crosses the end of the MIDI channel range.
-        if (readouts.getWidth() > 48.0f)
-        {
-            readouts.removeFromLeft (3.0f);
-            auto legend = readouts;
-            const auto labelWidth = juce::jmin (34.0f, legend.getWidth() * 0.18f);
-            auto label = legend.removeFromLeft (labelWidth);
-            g.setColour (muted.withAlpha (0.72f));
-            g.setFont (juce::FontOptions { 7.5f, juce::Font::bold });
-            g.drawText ("POLY", label, juce::Justification::centred);
-
-            const auto chipWidth = juce::jmin (48.0f,
-                                               legend.getWidth()
-                                                   / static_cast<float> (polyChainCount));
-            for (auto slot = 0; slot < polyChainCount; ++slot)
-            {
-                auto chip = legend.removeFromLeft (chipWidth).reduced (2.0f, 2.0f);
-                const auto accent = channelColours[static_cast<size_t> (slot)];
-                const auto isUsed = slot < voicing.noteCount;
-                g.setColour (accent.withAlpha (isUsed ? 0.16f : 0.07f));
-                g.fillRoundedRectangle (chip, 3.0f);
-                g.setColour (accent.withAlpha (isUsed ? 0.82f : 0.34f));
-                g.drawRoundedRectangle (chip, 3.0f, 0.9f);
-                g.setFont (juce::FontOptions { 8.0f, juce::Font::bold });
-                g.drawText ("CH " + juce::String (midiChannelForSlot (slot)), chip,
-                            juce::Justification::centred);
-            }
-        }
+        const auto voicingWidth = readouts.getWidth() * 46.0f / 100.0f;
+        const auto inversionWidth = readouts.getWidth() * 39.0f / 100.0f;
+        drawReadout (readouts.removeFromLeft (voicingWidth), green,
+                     "VOICING", controls.voicing);
+        drawReadout (readouts.removeFromLeft (inversionWidth), cyan,
+                     "INVERSION", controls.inversion);
+        drawReadout (readouts, orange, "REGISTER",
+                     controls.registerOctaves > 0
+                         ? "+" + juce::String (controls.registerOctaves)
+                         : juce::String (controls.registerOctaves));
 
         const auto whiteWidth = keyboard.getWidth() / static_cast<float> (octaveCount * 7);
         const auto blackWidth = whiteWidth * 0.58f;
@@ -829,46 +791,6 @@ private:
             return note >= firstNote && note <= lastNote;
         };
 
-        auto firstVisibleCandidate = -1;
-        auto lastVisibleCandidate = -1;
-        for (auto i = 0; i < voicing.candidateCount; ++i)
-        {
-            const auto note = voicing.candidates[static_cast<size_t> (i)];
-            if (! isVisible (note))
-                continue;
-            if (firstVisibleCandidate < 0)
-                firstVisibleCandidate = note;
-            lastVisibleCandidate = note;
-        }
-        if (firstVisibleCandidate >= 0)
-        {
-            const auto left = notePoint (firstVisibleCandidate).x;
-            const auto right = notePoint (lastVisibleCandidate).x;
-            lastRangeLeftX = left;
-            lastRangeRightX = right;
-            const juce::Rectangle<float> bracket { left, keyboard.getY() + 2.0f,
-                                                   juce::jmax (2.0f, right - left), 4.0f };
-            g.setColour (cyan.withAlpha (0.86f));
-            g.drawRoundedRectangle (bracket, 2.0f, 1.2f);
-            for (const auto handleX : { left, right })
-            {
-                g.setColour (background);
-                g.fillEllipse ({ handleX - 4.0f, bracket.getCentreY() - 4.0f, 8.0f, 8.0f });
-                g.setColour (cyan);
-                g.drawEllipse ({ handleX - 4.0f, bracket.getCentreY() - 4.0f, 8.0f, 8.0f },
-                               1.4f);
-            }
-        }
-
-        for (auto i = 0; i < voicing.candidateCount; ++i)
-        {
-            const auto note = voicing.candidates[static_cast<size_t> (i)];
-            if (! isVisible (note))
-                continue;
-            const auto point = notePoint (note);
-            g.setColour (muted.withAlpha (0.45f));
-            g.drawEllipse ({ point.x - 3.0f, point.y - 3.0f, 6.0f, 6.0f }, 0.9f);
-        }
         for (auto i = 0; i < voicing.noteCount; ++i)
         {
             const auto note = voicing.notes[static_cast<size_t> (i)];
@@ -900,7 +822,6 @@ private:
     PadVoicingControlState controls;
     int position = 50;
     int range = 13;
-    int spread = 4;
     juce::String harmony { "C / Major / Triad" };
     bool embedded = false;
     DragMode dragMode = DragMode::none;
@@ -939,11 +860,11 @@ public:
 
     void closeButtonPressed() override { setVisible (false); }
 
-    void setData (const NdlrEngine::PadVoicing& voicing, int position,
-                  int range, int spread, const juce::String& harmony,
+    void setData (const NdlrEngine::PadVoicing& voicing,
+                  const juce::String& harmony,
                   PadVoicingControlState controls)
     {
-        preview.setData (voicing, position, range, spread, harmony, std::move (controls));
+        preview.setData (voicing, harmony, std::move (controls));
     }
 
 private:
