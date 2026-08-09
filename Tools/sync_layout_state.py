@@ -92,11 +92,18 @@ def main() -> int:
     state_xml = decode_state_xml(state_data)
     embedded_layout = extract_layout(state_xml)
 
-    candidates = [
-        (path, description)
-        for path, description in default_candidates()
-        if path.is_file() and path.stat().st_mtime > state_file.stat().st_mtime
-    ]
+    available = default_candidates()
+    layout_cache = available[0]
+    standalone_state = available[1]
+    # current-layout.xml is written only after an explicit Layout Mode edit.
+    # NDLR.settings, however, receives a new timestamp whenever Standalone
+    # closes, even if its layout is stale. Once the explicit cache exists it
+    # is therefore the sole authority for future layout imports.
+    source_candidate = layout_cache if layout_cache[0].is_file() else standalone_state
+    candidates = [source_candidate] if (
+        source_candidate[0].is_file()
+        and source_candidate[0].stat().st_mtime > state_file.stat().st_mtime
+    ) else []
     if not candidates:
         print("NDLR layout: embedded state is already the newest source")
         return 0

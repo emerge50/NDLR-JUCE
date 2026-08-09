@@ -51,7 +51,19 @@ public:
         double internalTempo = 120.0;
     };
     struct DroneSettings { bool enabled = false; int position = 1, type = 1, trigger = 8, velocity = 90, midiChannel = 2; };
-    struct PadSettings { bool enabled=false; int position=50, range=13, spread=4, velocity=100, midiChannel=1; bool strum=false; int strumDivision=16; bool group=false; int polyChain=1; int inversionMode=0; int quantize=0; };
+    struct PadSettings
+    {
+        bool enabled = false;
+        int voicing = 0;
+        int inversion = 0;
+        int registerOctaves = 0;
+        int velocity = 100;
+        int midiChannel = 1;
+        bool strum = false;
+        int strumDivision = 16;
+        bool group = false;
+        int quantize = 0;
+    };
     struct PadVoicing
     {
         int targetNote = 64;
@@ -118,6 +130,9 @@ private:
         std::atomic<int> rhythmStep { -1 };
         int64_t noteCounter = 0;
         int64_t lastRhythmBoundary = -1;
+        int lastPatternLength = -1;
+        int lastRhythmLength = -1;
+        uint32_t humanizeRandomState = 1;
         int pendingRatchets = 0;
         int ratchetNote = 60;
         int ratchetChannel = 1;
@@ -132,11 +147,13 @@ private:
         int scheduledNote = 60;
         int scheduledChannel = 1;
 
-        void reset() noexcept
+        void reset (uint32_t humanizeSeed) noexcept
         {
             noteIsActive = false; activeNote = 60; activeChannel = 1;
             patternStep.store (-1); patternLength.store (8); rhythmStep.store (-1);
             noteCounter = 0; lastRhythmBoundary = -1; pendingRatchets = 0;
+            lastPatternLength = -1; lastRhythmLength = -1;
+            humanizeRandomState = humanizeSeed != 0 ? humanizeSeed : 1;
             ratchetNote = 60; ratchetChannel = 1; ratchetVelocity = 100;
             ratchetTotal = 1; ratchetHit = 1; nextRatchetPpq = 0.0;
             ratchetIntervalPpq = 0.0; ratchetTieAfter = false;
@@ -177,9 +194,9 @@ private:
     double padNextStrumPpq = 0.0, padStrumIntervalPpq = 0.0;
     bool padPendingTrigger = false;
     double padPendingTriggerPpq = 0.0;
-    int padLastVelocity = -1, padLastChannel = -1, padLastPolyChain = -1;
+    int padLastVelocity = -1, padLastChannel = -1;
     int padLastStrumDivision = -1, padLastQuantize = -1;
+    int padLastVoicing = -1, padLastInversion = -1, padLastRegister = -3;
     int lastHarmonyTriggerCounter = 0;
     bool padLastStrum = false, padLastGroup = false;
-    int padLastInversionMode = -1;
 };

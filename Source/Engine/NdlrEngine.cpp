@@ -1,4 +1,5 @@
 #include "NdlrEngine.h"
+#include "HarmonyData.h"
 #include "RhythmUtilities.h"
 #include "TimingUtilities.h"
 
@@ -14,8 +15,8 @@ void NdlrEngine::prepare (double newSampleRate)
 
 void NdlrEngine::reset()
 {
-    motif1Runtime.reset();
-    motif2Runtime.reset();
+    motif1Runtime.reset (0x6d2b79f5u);
+    motif2Runtime.reset (0x1b873593u);
     droneNoteCount = 0;
     droneLastBoundary = -1;
     padNoteCount = 0;
@@ -23,8 +24,10 @@ void NdlrEngine::reset()
     padNextStrumNote = 0;
     padPendingTrigger = false;
     padPendingTriggerPpq = 0.0;
-    padLastVelocity = padLastChannel = padLastPolyChain = padLastStrumDivision = -1;
+    padLastVelocity = padLastChannel = padLastStrumDivision = -1;
     padLastQuantize = -1;
+    padLastVoicing = padLastInversion = -1;
+    padLastRegister = -3;
     lastHarmonyTriggerCounter = 0;
     for (auto& channel : noteOwners) channel.fill (0);
     transportRunning.store (false);
@@ -40,8 +43,8 @@ void NdlrEngine::panic (juce::MidiBuffer& midi)
     stopActiveNote (motif2Runtime, midi, 0);
     for (auto channel = 1; channel <= 16; ++channel)
         midi.addEvent (juce::MidiMessage::allNotesOff (channel), 0);
-    motif1Runtime.reset();
-    motif2Runtime.reset();
+    motif1Runtime.reset (0x6d2b79f5u);
+    motif2Runtime.reset (0x1b873593u);
     droneNoteCount = 0;
     droneLastBoundary = -1;
     padNoteCount = 0;
@@ -158,11 +161,7 @@ void NdlrEngine::process (juce::MidiBuffer& midi, int numSamples,
         const auto voicing = calculatePadVoicing (harmonySettings, padSettings);
         auto wanted = voicing.notes;
         auto wantedCount = voicing.noteCount;
-
-        const auto inversionMode = juce::jlimit (0, 3, padSettings.inversionMode);
-        if (inversionMode == 1 || inversionMode == 2)
-            wanted = rotatePadVoicing (wanted, wantedCount, inversionMode);
-        else if (inversionMode == 3 && padNoteCount > 0)
+        if (padSettings.voicing == 11 && padNoteCount > 0)
             wanted = minimisePadVoiceMovement (
                 wanted, wantedCount, padNotes, padNoteCount);
 
@@ -170,9 +169,11 @@ void NdlrEngine::process (juce::MidiBuffer& midi, int numSamples,
         for (auto i = 0; i < wantedCount && ! changed; ++i)
             changed = wanted[static_cast<size_t> (i)] != padNotes[static_cast<size_t> (i)];
         const auto articulationChanged = padSettings.velocity != padLastVelocity
-            || padSettings.midiChannel != padLastChannel || padSettings.polyChain != padLastPolyChain
+            || padSettings.midiChannel != padLastChannel
             || padSettings.strum != padLastStrum || padSettings.group != padLastGroup
-            || inversionMode != padLastInversionMode
+            || padSettings.voicing != padLastVoicing
+            || padSettings.inversion != padLastInversion
+            || padSettings.registerOctaves != padLastRegister
             || padSettings.strumDivision != padLastStrumDivision
             || padSettings.quantize != padLastQuantize;
 
@@ -184,8 +185,7 @@ void NdlrEngine::process (juce::MidiBuffer& midi, int numSamples,
             padNoteSounded.fill (false);
             for (auto i = 0; i < padNoteCount; ++i)
                 padChannels[static_cast<size_t> (i)] =
-                    (juce::jlimit (1, 16, padSettings.midiChannel) - 1
-                     + i % juce::jlimit (1, 4, padSettings.polyChain)) % 16 + 1;
+                    juce::jlimit (1, 16, padSettings.midiChannel);
 
             static constexpr std::array<int, 21> ticks {
                 576,384,256,288,192,128,144,96,64,72,48,32,36,24,16,18,12,8,9,6,3
@@ -207,10 +207,11 @@ void NdlrEngine::process (juce::MidiBuffer& midi, int numSamples,
 
         padLastVelocity = padSettings.velocity;
         padLastChannel = padSettings.midiChannel;
-        padLastPolyChain = padSettings.polyChain;
         padLastStrum = padSettings.strum;
         padLastGroup = padSettings.group;
-        padLastInversionMode = inversionMode;
+        padLastVoicing = padSettings.voicing;
+        padLastInversion = padSettings.inversion;
+        padLastRegister = padSettings.registerOctaves;
         padLastStrumDivision = padSettings.strumDivision;
         padLastQuantize = padSettings.quantize;
     }
@@ -236,7 +237,7 @@ void NdlrEngine::process (juce::MidiBuffer& midi, int numSamples,
     rootLookup.position = 2;
     const auto rootClass = getMidiNote (harmonySettings, rootLookup,
                                         chordMode ? harmonySettings.degree + 1 : 1) % 12;
-    auto base = 12 * (juce::jlimit (0, 3, droneSettings.position) + 1) + rootClass;
+    auto base = 12 * (juce::jlimit (0, 3, droneSettings.position) + 2) + rootClass;
     std::array<int, 3> wanted { base, base + 12, base + 7 };
     auto wantedCount = 1;
     if (droneSettings.type == 1) wanted[1] = base + 12, wantedCount = 2;
@@ -290,7 +291,14 @@ void NdlrEngine::processMotif (MotifRuntimeState& runtime,
                                const MotifSettings& settings)
 {
     const auto length = juce::jlimit (1, 16, settings.length);
+    const auto rhythmLength = juce::jlimit (4, 32, settings.rhythmLength);
     runtime.patternLength.store (length);
+
+    const auto lengthsChanged = runtime.lastPatternLength >= 0
+        && (runtime.lastPatternLength != length
+            || runtime.lastRhythmLength != rhythmLength);
+    runtime.lastPatternLength = length;
+    runtime.lastRhythmLength = rhythmLength;
 
     if (! isPlaying || ! settings.enabled)
     {
@@ -304,11 +312,20 @@ void NdlrEngine::processMotif (MotifRuntimeState& runtime,
         return;
     }
 
+    // Pattern and rhythm lengths remain independent, but changing either one
+    // starts a fresh phase relationship at the next sounding rhythm step.
+    // This is the same resynchronisation that previously happened only after
+    // stopping and restarting the transport.
+    if (lengthsChanged)
+    {
+        runtime.noteCounter = 0;
+        runtime.patternStep.store (-1);
+    }
+
     const auto divisionTicks = getDivisionTicks (settings.divisionIndex);
     const auto stepPpq = static_cast<double> (divisionTicks) / ppqn;
     const auto absoluteTick = static_cast<int64_t> (std::floor (currentPpq * ppqn + 1.0e-9));
     const auto stepNumber = absoluteTick / divisionTicks;
-    const auto rhythmLength = juce::jlimit (4, 32, settings.rhythmLength);
     const auto signedRotation = juce::jlimit (-(rhythmLength - 1), rhythmLength - 1,
                                               settings.rotation);
     // Convention UI : une valeur positive tourne la roue dans le sens horaire.
@@ -458,11 +475,14 @@ void NdlrEngine::processMotif (MotifRuntimeState& runtime,
         // behave distinctly, as their explicit menu labels indicate.
         if (settings.accent == 2 && settings.humanize > 0)
         {
-            auto hash = static_cast<uint32_t> (boundaryNumber * 747796405u + 2891336453u);
-            hash = (hash >> ((hash >> 28) + 4)) ^ hash;
+            auto& randomState = runtime.humanizeRandomState;
+            randomState ^= randomState << 13;
+            randomState ^= randomState >> 17;
+            randomState ^= randomState << 5;
             const auto range = juce::jmax (1, juce::roundToInt (
-                static_cast<float> (settings.velocity * settings.humanize) / 10.0f));
-            const auto jitter = static_cast<int> (hash % static_cast<uint32_t> (range * 2 + 1)) - range;
+                static_cast<float> (velocity * settings.humanize) / 10.0f));
+            const auto jitter = static_cast<int> (
+                randomState % static_cast<uint32_t> (range * 2 + 1)) - range;
             velocity += jitter;
         }
         velocity = juce::jlimit (1, 127, velocity);
@@ -584,27 +604,9 @@ int NdlrEngine::getPatternValue (int pattern, int motifStep) noexcept
 int NdlrEngine::getMidiNote (const HarmonySettings& harmony,
                              const MotifSettings& motif, int patternValue) noexcept
 {
-    struct Scale
-    {
-        std::array<int, 8> intervals;
-        int length;
-    };
-
     using Formula = std::array<int, 7>;
     static constexpr int x = -1;
     static constexpr std::array<int, 12> keyMidi { 0, 7, 2, 9, 4, 11, 6, 1, 8, 3, 10, 5 };
-    static constexpr std::array<Scale, 28> scales {{
-        {{{ 0,2,4,5,7,9,11,x }},7}, {{{ 0,2,3,5,7,9,10,x }},7}, {{{ 0,1,3,5,7,8,10,x }},7},
-        {{{ 0,2,4,6,7,9,11,x }},7}, {{{ 0,2,4,5,7,9,10,x }},7}, {{{ 0,2,3,5,7,8,10,x }},7},
-        {{{ 0,1,3,5,6,8,10,x }},7}, {{{ 0,2,3,6,7,8,10,x }},7}, {{{ 0,2,3,5,7,8,11,x }},7},
-        {{{ 0,3,5,7,10,x,x,x }},5}, {{{ 0,2,4,6,8,10,x,x }},6}, {{{ 0,2,x,x,x,x,x,x }},2},
-        {{{ 0,4,x,x,x,x,x,x }},2}, {{{ 0,5,x,x,x,x,x,x }},2}, {{{ 0,9,x,x,x,x,x,x }},2},
-        {{{ 0,2,4,7,9,x,x,x }},5}, {{{ 0,3,5,6,7,10,x,x }},6}, {{{ 0,2,3,5,7,9,11,x }},7},
-        {{{ 0,1,3,5,7,9,10,x }},7}, {{{ 0,2,4,6,8,9,11,x }},7}, {{{ 0,2,4,6,7,9,10,x }},7},
-        {{{ 0,2,4,5,7,8,10,x }},7}, {{{ 0,2,3,5,6,8,10,x }},7}, {{{ 0,1,3,4,6,8,10,x }},7},
-        {{{ 0,1,4,5,7,8,10,x }},7}, {{{ 0,1,4,5,7,8,11,x }},7}, {{{ 0,1,3,4,6,7,9,10 }},8},
-        {{{ 0,3,4,7,8,11,x,x }},6}
-    }};
 
     static constexpr std::array<Formula, 18> formulas7 {{
         {{0,2,4,x,x,x,x}}, {{0,2,4,6,x,x,x}}, {{0,1,4,x,x,x,x}}, {{0,3,4,x,x,x,x}},
@@ -635,27 +637,54 @@ int NdlrEngine::getMidiNote (const HarmonySettings& harmony,
         {{0,3,4,5,x,x,x}}, {{0,2,3,5,x,x,x}}
     }};
     static constexpr Formula formula2 {{ 0, 1, x, x, x, x, x }};
+    static constexpr Formula sixthsAndSevenths {{ 0, 2, 4, 5, 6, x, x }};
+    static constexpr std::array<int, 7> colourToLegacyType { 0, 1, 7, 12, 13, 3, 4 };
+    static constexpr std::array<std::array<int, 5>, 2> chromaticColourIntervals {{
+        {{ 0, 3, 7, 10, 14 }},
+        {{ 0, 5, 7, 10, 14 }}
+    }};
 
-    const auto& scale = scales[static_cast<size_t> (juce::jlimit (0, 27, harmony.scale))];
-    const auto type = juce::jlimit (0, 17, harmony.chordType);
-    const Formula* formula = &formulas7[static_cast<size_t> (type)];
-    if (scale.length == 8) formula = &formulas8[static_cast<size_t> (type)];
-    if (scale.length == 6) formula = &formulas6[static_cast<size_t> (type)];
-    if (scale.length == 5) formula = &formulas5[static_cast<size_t> (type)];
-    if (scale.length == 2) formula = &formula2;
+    const auto& scale = ndlr::harmony::scales[static_cast<size_t> (
+        juce::jlimit (0, static_cast<int> (ndlr::harmony::scales.size()) - 1,
+                      harmony.scale))];
+    const auto colour = juce::jlimit (
+        0, static_cast<int> (ndlr::harmony::colourNames.size()) - 1,
+        harmony.chordType);
 
     std::array<bool, 12> chordClasses {};
-    for (const auto formulaIndex : *formula)
+    if (colour >= 7)
     {
-        if (formulaIndex < 0)
-            break;
+        const auto degree = juce::jlimit (0, 6, harmony.degree) % scale.length;
+        const auto root = 60
+            + keyMidi[static_cast<size_t> (juce::jlimit (0, 11, harmony.root))]
+            + scale.intervals[static_cast<size_t> (degree)];
+        for (const auto interval : chromaticColourIntervals[static_cast<size_t> (colour - 7)])
+            chordClasses[static_cast<size_t> ((root + interval) % 12)] = true;
+    }
+    else
+    {
+        const auto legacyType = colourToLegacyType[static_cast<size_t> (colour)];
+        const Formula* formula = &formulas7[static_cast<size_t> (legacyType)];
+        if (scale.length == 8) formula = &formulas8[static_cast<size_t> (legacyType)];
+        if (scale.length == 6) formula = &formulas6[static_cast<size_t> (legacyType)];
+        if (scale.length == 5) formula = &formulas5[static_cast<size_t> (legacyType)];
+        if (scale.length == 2) formula = &formula2;
+        if (colour == 6 && (scale.length == 7 || scale.length == 8))
+            formula = &sixthsAndSevenths;
 
-        const auto rawIndex = juce::jlimit (0, 6, harmony.degree) + formulaIndex;
-        const auto scaleIndex = rawIndex % scale.length;
-        const auto octave = rawIndex / scale.length;
-        const auto note = 60 + keyMidi[static_cast<size_t> (juce::jlimit (0, 11, harmony.root))]
-                        + scale.intervals[static_cast<size_t> (scaleIndex)] + octave * 12;
-        chordClasses[static_cast<size_t> (note % 12)] = true;
+        for (const auto formulaIndex : *formula)
+        {
+            if (formulaIndex < 0)
+                break;
+
+            const auto rawIndex = juce::jlimit (0, 6, harmony.degree) + formulaIndex;
+            const auto scaleIndex = rawIndex % scale.length;
+            const auto octave = rawIndex / scale.length;
+            const auto note = 60
+                + keyMidi[static_cast<size_t> (juce::jlimit (0, 11, harmony.root))]
+                + scale.intervals[static_cast<size_t> (scaleIndex)] + octave * 12;
+            chordClasses[static_cast<size_t> (note % 12)] = true;
+        }
     }
 
     static constexpr std::array<std::array<int, 2>, 5> positionRanges {{
@@ -719,40 +748,222 @@ NdlrEngine::PadVoicing NdlrEngine::calculatePadVoicing (
     for (auto voice = 1; voice <= 7; ++voice)
         chordClasses[static_cast<size_t> (getMidiNote (harmony, lookup, voice) % 12)] = true;
 
-    std::array<int, 128> pool {};
-    auto poolSize = 0;
-    for (auto note = 0; note < 128; ++note)
-        if (chordClasses[static_cast<size_t> (note % 12)])
-            pool[static_cast<size_t> (poolSize++)] = note;
+    static constexpr std::array<int, 12> keyMidi { 0, 7, 2, 9, 4, 11, 6, 1, 8, 3, 10, 5 };
+    const auto& scale = ndlr::harmony::scales[static_cast<size_t> (
+        juce::jlimit (0, static_cast<int> (ndlr::harmony::scales.size()) - 1,
+                      harmony.scale))];
+    const auto degree = juce::jlimit (0, 6, harmony.degree) % scale.length;
+    const auto rootClass = (keyMidi[static_cast<size_t> (
+        juce::jlimit (0, 11, harmony.root))]
+        + scale.intervals[static_cast<size_t> (degree)]) % 12;
+    std::array<bool, 12> upperExtensionClasses {};
+    const auto colour = juce::jlimit (
+        0, static_cast<int> (ndlr::harmony::colourNames.size()) - 1,
+        harmony.chordType);
+    const auto markScaleExtension = [&] (int degreeOffset)
+    {
+        const auto scaleIndex = (degree + degreeOffset) % scale.length;
+        const auto noteClass = (keyMidi[static_cast<size_t> (
+            juce::jlimit (0, 11, harmony.root))]
+            + scale.intervals[static_cast<size_t> (scaleIndex)]) % 12;
+        upperExtensionClasses[static_cast<size_t> (noteClass)] = true;
+    };
+    if (colour >= 2 && colour <= 4)
+    {
+        markScaleExtension (1); // 9th
+        if (colour >= 3) markScaleExtension (3); // 11th
+        if (colour >= 4) markScaleExtension (5); // 13th
+    }
+    else if (colour == 7)
+        upperExtensionClasses[static_cast<size_t> ((rootClass + 2) % 12)] = true;
+
+    std::array<int, 22> compact {};
+    auto compactCount = 0;
+    const auto root = 60 + rootClass;
+    for (auto interval = 0; interval < 12; ++interval)
+        if (chordClasses[static_cast<size_t> ((rootClass + interval) % 12)])
+            compact[static_cast<size_t> (compactCount++)] = root + interval;
+
+    const auto sortUnique = [] (std::array<int, 22> notes, int& count)
+    {
+        for (auto i = 0; i < count; ++i)
+            notes[static_cast<size_t> (i)] = juce::jlimit (
+                0, 127, notes[static_cast<size_t> (i)]);
+        std::sort (notes.begin(), notes.begin() + count);
+        auto write = 0;
+        for (auto read = 0; read < count; ++read)
+            if (write == 0 || notes[static_cast<size_t> (read)]
+                                != notes[static_cast<size_t> (write - 1)])
+                notes[static_cast<size_t> (write++)] = notes[static_cast<size_t> (read)];
+        count = write;
+        return notes;
+    };
+    const auto dropVoices = [&sortUnique] (std::array<int, 22> notes, int& count,
+                                            std::initializer_list<int> drops)
+    {
+        for (const auto drop : drops)
+        {
+            const auto index = count - drop;
+            if (index >= 0)
+                notes[static_cast<size_t> (index)] -= 12;
+        }
+        return sortUnique (notes, count);
+    };
+
+    const auto inversion = juce::jlimit (0, 6, pad.inversion);
+    auto inverted = compact;
+    auto invertedCount = compactCount;
+    if ((inversion == 1 || inversion == 2) && invertedCount > 1)
+    {
+        std::array<int, 22> rotated {};
+        for (auto voice = 0; voice < invertedCount; ++voice)
+        {
+            auto note = compact[static_cast<size_t> (
+                (voice + inversion) % invertedCount)];
+            if (voice > 0)
+                while (note <= rotated[static_cast<size_t> (voice - 1)])
+                    note += 12;
+            rotated[static_cast<size_t> (voice)] = note;
+        }
+        inverted = rotated;
+    }
+    else if (inversion == 3)
+        inverted = dropVoices (inverted, invertedCount, { 2 });
+    else if (inversion == 4)
+        inverted = dropVoices (inverted, invertedCount, { 2, 3 });
+    else if (inversion == 5 && invertedCount > 0)
+    {
+        std::array<int, 22> specialised {};
+        const auto third = inverted[static_cast<size_t> (juce::jmin (1, invertedCount - 1))];
+        const auto fifth = inverted[static_cast<size_t> (juce::jmin (2, invertedCount - 1))];
+        const auto seventh = inverted[static_cast<size_t> (invertedCount - 1)];
+        specialised[0] = root - 24;
+        specialised[1] = root - 12;
+        specialised[2] = fifth - 12;
+        specialised[3] = seventh - 12;
+        specialised[4] = third;
+        invertedCount = 5;
+        inverted = sortUnique (specialised, invertedCount);
+    }
+    else if (inversion == 6 && invertedCount > 0)
+    {
+        const auto third = inverted[static_cast<size_t> (juce::jmin (1, invertedCount - 1))];
+        inverted = {{ root - 24, root - 12, third, root + 12 }};
+        invertedCount = 4;
+    }
+
+    auto voiced = inverted;
+    auto voicedCount = invertedCount;
+    const auto voicing = juce::jlimit (
+        0, static_cast<int> (ndlr::harmony::padVoicingNames.size()) - 1,
+        pad.voicing);
+    if (voicing == 0)
+    {
+        // Les inversions Scaler spécialisées construisent déjà leur registre
+        // final. Seules les positions fondamentale, 1st et 2nd passent par
+        // l'abaissement d'octave du profil None.
+        if (inversion < 3)
+            for (auto i = 0; i < voicedCount; ++i)
+                voiced[static_cast<size_t> (i)] -= 12;
+    }
+    else if (voicing == 1)
+    {
+        auto bassInterval = 0;
+        if (inversion == 1 && compactCount > 1)
+            bassInterval = compact[1] - root;
+        else if (inversion == 2)
+            for (auto i = 1; i < compactCount; ++i)
+                if (compact[static_cast<size_t> (i)] - root == 7)
+                    bassInterval = 7;
+
+        voicedCount = 0;
+        voiced[static_cast<size_t> (voicedCount++)] = root - 24 + bassInterval;
+
+        // NDLR-Max Dynamic anchors the fifth below the central tonic, then
+        // keeps the root and defining chord tones in the central octave.
+        if (chordClasses[static_cast<size_t> ((rootClass + 7) % 12)])
+            voiced[static_cast<size_t> (voicedCount++)] = root - 5;
+        voiced[static_cast<size_t> (voicedCount++)] = root;
+        for (auto i = 1; i < compactCount; ++i)
+        {
+            const auto interval = compact[static_cast<size_t> (i)] - root;
+            if (interval != 7)
+            {
+                auto note = root + interval;
+                if (upperExtensionClasses[static_cast<size_t> (note % 12)])
+                {
+                    note += 12;
+                    if (note - root > 19)
+                        note -= 12;
+                }
+                voiced[static_cast<size_t> (voicedCount++)] = note;
+            }
+        }
+    }
+    else if (voicing == 2)
+    {
+        voicedCount = 0;
+        for (auto interval = 0; interval < 12; ++interval)
+            if (chordClasses[static_cast<size_t> (interval)])
+            {
+                auto note = 48 + interval;
+                if (note > 59) note -= 12;
+                voiced[static_cast<size_t> (voicedCount++)] = note;
+            }
+    }
+    else if (voicing >= 3 && voicing <= 5)
+    {
+        voiced = inverted;
+        for (auto i = 1; i < voicedCount; i += 2)
+            voiced[static_cast<size_t> (i)] += 12;
+        voiced = sortUnique (voiced, voicedCount);
+        if (voicing >= 4 && voicedCount > 0)
+            voiced[0] -= 12;
+        if (voicing >= 5 && voicedCount > 0)
+            voiced[static_cast<size_t> (voicedCount - 1)] += 12;
+        for (auto i = 0; i < voicedCount; ++i)
+            voiced[static_cast<size_t> (i)] -= 12;
+    }
+    else if (voicing == 6)
+    {
+        static constexpr std::array<int, 6> tuning { 40, 45, 50, 55, 59, 64 };
+        voicedCount = 0;
+        for (const auto openString : tuning)
+        {
+            auto selected = -1;
+            for (auto fret = 0; fret <= 12; ++fret)
+                if (chordClasses[static_cast<size_t> ((openString + fret) % 12)])
+                {
+                    selected = openString + fret;
+                    break;
+                }
+            if (selected >= 0)
+                voiced[static_cast<size_t> (voicedCount++)] = selected;
+        }
+    }
+    else if (voicing == 7)
+        voiced = dropVoices (inverted, voicedCount, { 2 });
+    else if (voicing == 8)
+        voiced = dropVoices (inverted, voicedCount, { 3 });
+    else if (voicing == 9)
+        voiced = dropVoices (inverted, voicedCount, { 4 });
+    else if (voicing == 10)
+        voiced = dropVoices (inverted, voicedCount, { 2, 3 });
+
+    voiced = sortUnique (voiced, voicedCount);
+    const auto registerShift = juce::jlimit (-2, 2, pad.registerOctaves) * 12;
+    for (auto i = 0; i < voicedCount; ++i)
+        voiced[static_cast<size_t> (i)] += registerShift;
+    voiced = sortUnique (voiced, voicedCount);
 
     PadVoicing result;
-    result.targetNote = juce::roundToInt (
-        static_cast<float> (juce::jlimit (0, 100, pad.position)) * 1.27f);
-    auto closest = 0;
-    for (auto i = 1; i < poolSize; ++i)
-        if (std::abs (pool[static_cast<size_t> (i)] - result.targetNote)
-            < std::abs (pool[static_cast<size_t> (closest)] - result.targetNote))
-            closest = i;
-    result.centreNote = pool[static_cast<size_t> (closest)];
-
-    result.candidateCount = juce::jmin (juce::jlimit (1, 22, pad.range), poolSize);
-    const auto first = juce::jlimit (0, poolSize - result.candidateCount,
-                                    closest - result.candidateCount / 2);
-    for (auto i = 0; i < result.candidateCount; ++i)
-    {
-        const auto note = pool[static_cast<size_t> (first + i)];
-        result.candidates[static_cast<size_t> (i)] = note;
-        const auto keep = (pad.spread <= 1 || result.candidateCount <= 4) ? true
-                       : pad.spread == 2 ? (i % 2 == 0 || i == result.candidateCount - 1)
-                       : pad.spread == 3 ? (i >= result.candidateCount / 3
-                                            && i < result.candidateCount / 3 + 4)
-                       : pad.spread == 4 ? ((i * 37 + harmony.degree * 11) % 10 < 7)
-                       : pad.spread == 5 ? i % 2 == 0 : i % 3 != 1;
-        if (keep)
-            result.notes[static_cast<size_t> (result.noteCount++)] = note;
-    }
-    if (result.noteCount == 0)
-        result.notes[static_cast<size_t> (result.noteCount++)] = result.centreNote;
+    result.notes = voiced;
+    result.noteCount = voicedCount;
+    result.candidates = voiced;
+    result.candidateCount = voicedCount;
+    result.targetNote = juce::jlimit (0, 127, root - 12 + registerShift);
+    result.centreNote = voicedCount > 0
+        ? voiced[static_cast<size_t> (voicedCount / 2)] : result.targetNote;
     return result;
 }
 

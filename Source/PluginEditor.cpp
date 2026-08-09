@@ -1,4 +1,5 @@
 #include "PluginEditor.h"
+#include "Engine/HarmonyData.h"
 #include "Engine/RhythmUtilities.h"
 #include <NdlrDefaultLayoutData.h>
 
@@ -158,24 +159,20 @@ NdlrAudioProcessorEditor::NdlrAudioProcessorEditor (NdlrAudioProcessor& processo
     layoutDebugOverlay.addTarget (pad, "Pad");
     layoutDebugOverlay.addTarget (padVoicingMiniView, "Pad / Voicing Map");
     layoutDebugOverlay.addTarget (padOn, "Pad / On");
-    for (auto index = 0; index < 6; ++index)
-        layoutDebugOverlay.addTarget (
-            padSpreadButtons[static_cast<size_t> (index)],
-            "Pad / Spread / " + juce::String (index + 1));
+    layoutDebugOverlay.addTarget (padVoicing, "Pad / Voicing");
+    layoutDebugOverlay.addTarget (padRegister, "Pad / Register");
     layoutDebugOverlay.addTarget (padVelocity, "Pad / Velocity");
     layoutDebugOverlay.addTarget (padChannel, "Pad / MIDI Channel");
     layoutDebugOverlay.addTarget (padStrum, "Pad / Strum");
     layoutDebugOverlay.addTarget (padStrumDivision, "Pad / Strum Division");
     layoutDebugOverlay.addTarget (padGroup, "Pad / Group");
-    layoutDebugOverlay.addTarget (padPolyChain, "Pad / Poly Chain");
-    layoutDebugOverlay.addTarget (padInversionMode, "Pad / Inversion Mode", "Pad / Invert");
+    layoutDebugOverlay.addTarget (padInversionMode, "Pad / Inversion");
     layoutDebugOverlay.addTarget (padQuantize, "Pad / Quantize");
-    layoutDebugOverlay.addTarget (padPositionLabel, "Pad / Position Label");
-    layoutDebugOverlay.addTarget (padRangeLabel, "Pad / Range Label");
-    layoutDebugOverlay.addTarget (padSpreadLabel, "Pad / Spread Label");
+    layoutDebugOverlay.addTarget (padVoicingLabel, "Pad / Voicing Label");
+    layoutDebugOverlay.addTarget (padInversionLabel, "Pad / Inversion Label");
+    layoutDebugOverlay.addTarget (padRegisterLabel, "Pad / Register Label");
     layoutDebugOverlay.addTarget (padVelocityLabel, "Pad / Velocity Label");
     layoutDebugOverlay.addTarget (padChannelLabel, "Pad / MIDI Label");
-    layoutDebugOverlay.addTarget (padPolyLabel, "Pad / Poly Label");
     layoutDebugOverlay.addTarget (padDivisionLabel, "Pad / Division Label");
     layoutDebugOverlay.addTarget (padQuantizeLabel, "Pad / Quantize Label");
     layoutDebugOverlay.addTarget (drone, "Drone");
@@ -286,8 +283,10 @@ NdlrAudioProcessorEditor::NdlrAudioProcessorEditor (NdlrAudioProcessor& processo
 
     // Section Harmony. La roue pilote directement la tonalité et le degré ;
     // seuls les gammes et les couleurs d'accord restent sous forme de menus.
-    harmonyScale.addItemList ({ "Major", "Dorian", "Phrygian", "Lydian", "Mixolydian", "Minor", "Locrian", "Gypsy Min", "Harm. Minor", "Minor Penta", "Whole Tone", "Tonic 2nds", "Tonic 3rds", "Tonic 4ths", "Tonic 6ths", "Major Penta", "Blues", "Melodic Min", "Dorian b2", "Lydian Aug", "Lydian Dom", "Mixo b6", "Locrian #2", "Altered", "Phryg. Dom", "Byzantine", "Dim H-W", "Augmented" }, 1);
-    harmonyType.addItemList ({ "Triad", "7th", "sus2", "sus4", "6th", "mu", "add9", "9th", "quartal", "power", "shell", "quintal", "11th", "13th", "cluster", "shell9", "open9", "So What" }, 1);
+    for (const auto* name : ndlr::harmony::scaleNames)
+        harmonyScale.addItem (name, harmonyScale.getNumItems() + 1);
+    for (const auto* name : ndlr::harmony::colourNames)
+        harmonyType.addItem (name, harmonyType.getNumItems() + 1);
     for (auto channel = 1; channel <= 16; ++channel)
     {
         harmonyKeyMidiChannel.addItem (juce::String (channel), channel);
@@ -361,62 +360,36 @@ NdlrAudioProcessorEditor::NdlrAudioProcessorEditor (NdlrAudioProcessor& processo
     configureDroneLabel (droneVelocityLabel, "VELOCITY");
     configureDroneLabel (droneChannelLabel, "MIDI CH");
     for (auto* toggle : { &padOn, &padStrum, &padGroup }) toggle->setClickingTogglesState (true);
-    padInvert.setClickingTogglesState (true);
-    for (auto* slider : { &padPosition, &padRange, &padSpread, &padVelocity, &padPolyChain })
-    { slider->setSliderStyle (juce::Slider::IncDecButtons); slider->setTextBoxStyle (juce::Slider::TextBoxLeft, false, 38, 22); }
-    for (auto* slider : { &padPosition, &padRange, &padSpread })
-    {
-        slider->setTextBoxStyle (juce::Slider::TextBoxAbove, false, 25, 16);
-        slider->getProperties().set (ndlr::ui::incDecValueWidthProperty, 25);
-        slider->getProperties().set (ndlr::ui::incDecButtonWidthProperty, 11);
-        slider->getProperties().set (ndlr::ui::incDecGlyphScaleProperty, 0.18f);
-        slider->getProperties().set (ndlr::ui::incDecLineWidthProperty, 1.2f);
-    }
+    padVelocity.setSliderStyle (juce::Slider::IncDecButtons);
+    padVelocity.setTextBoxStyle (juce::Slider::TextBoxLeft, false, 38, 22);
     padStrumDivision.addItemList ({ "1nd","1n","1nt","2nd","2n","2nt","4nd","4n","4nt","8nd","8n","8nt","16nd","16n","16nt","32nd","32n","32nt","64nd","64n","128n" }, 1);
     for (auto channel=1; channel<=16; ++channel) padChannel.addItem (juce::String (channel), channel);
     padQuantize.addItemList ({ "Off", "1/4", "1/8" }, 1);
-    padInversionMode.addItemList ({ "ROOT", "1ST", "2ND", "AUTO" }, 1);
-    padInversionMode.setTooltip (
-        "ROOT: base voicing; 1ST/2ND: fixed inversions; AUTO: minimum tonal movement");
-    for (auto* menu : { &padStrumDivision, &padChannel, &padQuantize, &padInversionMode })
+    for (const auto* name : ndlr::harmony::padVoicingNames)
+        padVoicing.addItem (name, padVoicing.getNumItems() + 1);
+    for (const auto* name : ndlr::harmony::padInversionNames)
+        padInversionMode.addItem (name, padInversionMode.getNumItems() + 1);
+    padRegister.addItemList ({ "-2", "-1", "0", "+1", "+2" }, 1);
+    for (auto* menu : { &padVoicing, &padInversionMode, &padRegister,
+                        &padStrumDivision, &padChannel, &padQuantize })
     {
         menu->setColour (juce::ComboBox::textColourId, ndlr::ui::green);
         menu->setColour (juce::ComboBox::arrowColourId, ndlr::ui::green);
     }
-    for (auto* c : std::array<juce::Component*, 9> { &padOn,&padStrum,&padGroup,&padInversionMode,&padVelocity,&padPolyChain,&padStrumDivision,&padChannel,&padQuantize }) pad.addAndMakeVisible (*c);
-    for (auto index = 0; index < 6; ++index)
-    {
-        auto& button = padSpreadButtons[static_cast<size_t> (index)];
-        button.onClick = [this, index]
-        {
-            padSpread.setValue (static_cast<double> (index + 1), juce::sendNotificationSync);
-        };
-        pad.addAndMakeVisible (button);
-    }
+    for (auto* c : std::array<juce::Component*, 10> {
+             &padOn, &padVoicing, &padInversionMode, &padRegister, &padVelocity,
+             &padStrum, &padStrumDivision, &padGroup, &padChannel, &padQuantize })
+        pad.addAndMakeVisible (*c);
     padVoicingMiniView.setEmbeddedMode (true);
-    padVoicingMiniView.setInterceptsMouseClicks (true, false);
-    padVoicingMiniView.onPositionChange = [this] (int value)
-    {
-        padPosition.setValue (value, juce::sendNotificationSync);
-    };
-    padVoicingMiniView.onRangeChange = [this] (int value)
-    {
-        padRange.setValue (value, juce::sendNotificationSync);
-    };
-    padVoicingMiniView.onPositionGesture = [this] (bool isStarting)
-    {
-        if (auto* parameter = owner.getParameters().getParameter ("pad.position"))
-            isStarting ? parameter->beginChangeGesture() : parameter->endChangeGesture();
-    };
-    padVoicingMiniView.onRangeGesture = [this] (bool isStarting)
-    {
-        if (auto* parameter = owner.getParameters().getParameter ("pad.range"))
-            isStarting ? parameter->beginChangeGesture() : parameter->endChangeGesture();
-    };
+    padVoicingMiniView.setInterceptsMouseClicks (false, false);
     pad.addAndMakeVisible (padVoicingMiniView);
     padVoicingMiniView.toBack();
     auto padLabel = [this] (juce::Label& l, const juce::String& t) { l.setText(t,juce::dontSendNotification); l.setColour(juce::Label::textColourId,ndlr::ui::muted); l.setFont(juce::FontOptions{13.0f,juce::Font::bold}); l.setJustificationType(juce::Justification::centred); pad.addAndMakeVisible(l); };
-    padLabel(padPositionLabel,"POSITION"); padLabel(padRangeLabel,"RANGE"); padLabel(padSpreadLabel,"SPREAD"); padLabel(padVelocityLabel,"VELOCITY"); padLabel(padChannelLabel,"MIDI CH"); padLabel(padPolyLabel,"POLY");
+    padLabel (padVoicingLabel, "VOICING");
+    padLabel (padInversionLabel, "INVERSION");
+    padLabel (padRegisterLabel, "REGISTER");
+    padLabel (padVelocityLabel, "VELOCITY");
+    padLabel (padChannelLabel, "MIDI CH");
     padLabel (padDivisionLabel, "DIV");
     padLabel (padQuantizeLabel, "QUANTIZE");
     juce::StringArray modShapes { "Sine","Triangle","Ramp","Saw","Square","Pulse","Random",
@@ -430,7 +403,7 @@ NdlrAudioProcessorEditor::NdlrAudioProcessorEditor (NdlrAudioProcessor& processo
     const juce::StringArray modDests {
         "None",
         "Key", "Scales", "Degree", "Colors",
-        "Pad On", "Pad Position", "Pad Range", "Pad Spread", "Pad Strum", "Pad Velocity",
+        "Pad On", "Pad Register", "Pad Inversion", "Pad Voicing", "Pad Strum", "Pad Velocity",
         "Drone On", "Drone Position", "Drone Type", "Drone Trigger", "Drone Velocity",
         "M1 On", "M1 Register", "M1 Pattern", "M1 Active Pattern", "M1 Length", "M1 Variation",
         "M1 Division", "M1 Velocity", "M1 Gate", "M1 Accent", "M1 Rhythm",
@@ -909,11 +882,6 @@ NdlrAudioProcessorEditor::NdlrAudioProcessorEditor (NdlrAudioProcessor& processo
             parameter->endChangeGesture();
         }
     };
-    padInversionMode.onChange = [this, setParameter]
-    {
-        setParameter ("pad.invert",
-                      padInversionMode.getSelectedItemIndex() == 3 ? 1.0f : 0.0f);
-    };
     for (auto i = 0; i < 3; ++i)
     {
         const auto n = static_cast<size_t> (i);
@@ -1197,11 +1165,11 @@ NdlrAudioProcessorEditor::NdlrAudioProcessorEditor (NdlrAudioProcessor& processo
              &motif2RegisterButtons[4],
              &motif2Humanize, &motif2Accent, &motif2Gate })
         colourEditable (*component, ndlr::ui::orange);
-    for (auto* component : std::array<juce::Component*, 24> {
+    for (auto* component : std::array<juce::Component*, 22> {
              &transportPlay, &transportTempo, &layoutDebugButton, &harmonyScale, &harmonyType,
              &harmonyKeyMidiChannel, &harmonyDegreeMidiChannel,
-             &padOn, &padStrum, &padGroup, &padInversionMode, &padPosition, &padRange, &padSpread,
-             &padVelocity, &padPolyChain, &padStrumDivision, &padChannel, &padQuantize,
+             &padOn, &padStrum, &padGroup, &padVoicing, &padInversionMode, &padRegister,
+             &padVelocity, &padStrumDivision, &padChannel, &padQuantize,
              &droneOn, &dronePosition, &droneType, &droneTrigger, &droneVelocity })
         colourEditable (*component, ndlr::ui::green);
     colourEditable (droneChannel, ndlr::ui::green);
@@ -1268,9 +1236,9 @@ NdlrAudioProcessorEditor::NdlrAudioProcessorEditor (NdlrAudioProcessor& processo
     droneTriggerAttachment = std::make_unique<ComboAttachment> (parameters, "drone.trigger", droneTrigger);
     droneVelocityAttachment = std::make_unique<SliderAttachment> (parameters, "drone.velocity", droneVelocity);
     droneChannelAttachment = std::make_unique<ComboAttachment> (parameters, "drone.channel", droneChannel);
-    padOnAttachment=std::make_unique<ButtonAttachment>(parameters,"pad.on",padOn); padStrumAttachment=std::make_unique<ButtonAttachment>(parameters,"pad.strum",padStrum); padGroupAttachment=std::make_unique<ButtonAttachment>(parameters,"pad.group",padGroup); padInvertAttachment=std::make_unique<ButtonAttachment>(parameters,"pad.invert",padInvert);
-    padPositionAttachment=std::make_unique<SliderAttachment>(parameters,"pad.position",padPosition); padRangeAttachment=std::make_unique<SliderAttachment>(parameters,"pad.range",padRange); padSpreadAttachment=std::make_unique<SliderAttachment>(parameters,"pad.spread",padSpread); padVelocityAttachment=std::make_unique<SliderAttachment>(parameters,"pad.velocity",padVelocity); padPolyAttachment=std::make_unique<SliderAttachment>(parameters,"pad.polyChain",padPolyChain);
-    padDivisionAttachment=std::make_unique<ComboAttachment>(parameters,"pad.strumDivision",padStrumDivision); padChannelAttachment=std::make_unique<ComboAttachment>(parameters,"pad.channel",padChannel); padQuantizeAttachment=std::make_unique<ComboAttachment>(parameters,"pad.quantize",padQuantize); padInversionModeAttachment=std::make_unique<ComboAttachment>(parameters,"pad.inversionMode",padInversionMode);
+    padOnAttachment=std::make_unique<ButtonAttachment>(parameters,"pad.on",padOn); padStrumAttachment=std::make_unique<ButtonAttachment>(parameters,"pad.strum",padStrum); padGroupAttachment=std::make_unique<ButtonAttachment>(parameters,"pad.group",padGroup);
+    padVoicingAttachment=std::make_unique<ComboAttachment>(parameters,"pad.voicing",padVoicing); padInversionModeAttachment=std::make_unique<ComboAttachment>(parameters,"pad.inversionMode",padInversionMode); padRegisterAttachment=std::make_unique<ComboAttachment>(parameters,"pad.register",padRegister); padVelocityAttachment=std::make_unique<SliderAttachment>(parameters,"pad.velocity",padVelocity);
+    padDivisionAttachment=std::make_unique<ComboAttachment>(parameters,"pad.strumDivision",padStrumDivision); padChannelAttachment=std::make_unique<ComboAttachment>(parameters,"pad.channel",padChannel); padQuantizeAttachment=std::make_unique<ComboAttachment>(parameters,"pad.quantize",padQuantize);
     for(auto i=0;i<3;++i){const auto p="mod.lfo"+juce::String(i+1)+"."; const auto n=static_cast<size_t>(i); modLfoShapeAttachment[n]=std::make_unique<ComboAttachment>(parameters,p+"shape",modLfoShape[n]); modLfoDivisionAttachment[n]=std::make_unique<ComboAttachment>(parameters,p+"division",modLfoDivision[n]); modLfoSyncAttachment[n]=std::make_unique<ButtonAttachment>(parameters,p+"sync",modLfoSync[n]); modLfoRetriggerAttachment[n]=std::make_unique<ButtonAttachment>(parameters,p+"retrigger",modLfoRetrigger[n]); modLfoRateAttachment[n]=std::make_unique<SliderAttachment>(parameters,p+"rate",modLfoRate[n]); modLfoProbabilityAttachment[n]=std::make_unique<SliderAttachment>(parameters,p+"probability",modLfoProbability[n]); modLfoPulseWidthAttachment[n]=std::make_unique<SliderAttachment>(parameters,p+"pulseWidth",modLfoPulseWidth[n]); modLfoLengthAttachment[n]=std::make_unique<SliderAttachment>(parameters,p+"length",modLfoLength[n]); modLfoPhaseAttachment[n]=std::make_unique<SliderAttachment>(parameters,p+"phase",modLfoPhase[n]); modLfoAmplitudeSourceAttachment[n]=std::make_unique<ComboAttachment>(parameters,p+"amplitudeSource",modLfoAmplitudeSource[n]); modLfoAmplitudeAttachment[n]=std::make_unique<SliderAttachment>(parameters,p+"amplitude",modLfoAmplitude[n]); modLfoAmplitudeCcNumberAttachment[n]=std::make_unique<ComboAttachment>(parameters,p+"amplitudeCcNumber",modLfoAmplitudeCcNumber[n]); modLfoAmplitudeCcChannelAttachment[n]=std::make_unique<ComboAttachment>(parameters,p+"amplitudeCcChannel",modLfoAmplitudeCcChannel[n]);}
     for(auto i=0;i<8;++i){const auto p="mod.slot"+juce::String(i+1)+"."; const auto n=static_cast<size_t>(i); modSlotOnAttachment[n]=std::make_unique<ButtonAttachment>(parameters,p+"on",modSlotOn[n]); modSlotSourceAttachment[n]=std::make_unique<ComboAttachment>(parameters,p+"source",modSlotSource[n]); modSlotDestinationAttachment[n]=std::make_unique<ComboAttachment>(parameters,p+"destination",modSlotDestination[n]); modSlotCcNumberAttachment[n]=std::make_unique<ComboAttachment>(parameters,p+"ccNumber",modSlotCcNumber[n]); modSlotCcChannelAttachment[n]=std::make_unique<ComboAttachment>(parameters,p+"ccChannel",modSlotCcChannel[n]); modSlotAmountAttachment[n]=std::make_unique<SliderAttachment>(parameters,p+"amount",modSlotAmount[n]);}
     perlinOnAttachment = std::make_unique<ButtonAttachment> (parameters, "perlin.on", perlinOn);
@@ -1562,40 +1530,30 @@ void NdlrAudioProcessorEditor::layoutDroneControls()
 void NdlrAudioProcessorEditor::layoutPadControls()
 {
     auto area = pad.getLocalBounds().reduced (12);
-    constexpr auto lowerControlsHeight = 59;
-    constexpr auto spreadControlsHeight = 30;
-    constexpr auto verticalGaps = 6;
+    constexpr auto lowerControlsHeight = 79;
+    constexpr auto verticalGaps = 5;
     const auto keyboardHeight = juce::jlimit (
-        70, 320, area.getHeight() - lowerControlsHeight
-                     - spreadControlsHeight - verticalGaps);
+        70, 320, area.getHeight() - lowerControlsHeight - verticalGaps);
     const auto keyboardArea = area.removeFromTop (keyboardHeight);
     padVoicingMiniView.setBounds (keyboardArea);
 
-    // Les sliders restent relies aux parametres et a l'automation, mais leur
-    // interface +/- est remplacee par le glissement direct dans le clavier.
-    padPosition.setBounds ({});
-    padRange.setBounds ({});
-    padSpread.setBounds ({});
-    padPositionLabel.setBounds ({});
-    padRangeLabel.setBounds ({});
-
-    area.removeFromTop (3);
-    auto spreadArea = area.removeFromTop (spreadControlsHeight);
-    padSpreadLabel.setFont (juce::FontOptions { 10.0f, juce::Font::bold });
-    padSpreadLabel.setBounds (spreadArea.removeFromLeft (52).reduced (2, 1));
-    const auto spreadButtonWidth = spreadArea.getWidth() / 6;
-    for (auto index = 0; index < 6; ++index)
+    const auto layoutCell = [] (juce::Rectangle<int> cell, juce::Label& label,
+                                juce::Component& control)
     {
-        auto buttonArea = index == 5 ? spreadArea
-                                     : spreadArea.removeFromLeft (spreadButtonWidth);
-        padSpreadButtons[static_cast<size_t> (index)].setBounds (
-            buttonArea.withSizeKeepingCentre (72, 24));
-    }
+        label.setFont (juce::FontOptions { 9.0f, juce::Font::bold });
+        label.setMinimumHorizontalScale (0.70f);
+        label.setBounds (cell.removeFromTop (17));
+        control.setBounds (cell.reduced (2, 1));
+    };
 
     area.removeFromTop (3);
-    auto row1 = area.removeFromTop (27);
-    auto padOnArea = row1.removeFromLeft (juce::jmin (70, row1.getWidth() / 5));
-    padOn.setBounds (padOnArea.reduced (2, 2));
+    auto row1 = area.removeFromTop (47);
+    padOn.setBounds (row1.removeFromLeft (60).reduced (2, 10));
+    const auto voicingWidth = row1.getWidth() * 44 / 100;
+    const auto inversionWidth = row1.getWidth() * 38 / 100;
+    layoutCell (row1.removeFromLeft (voicingWidth), padVoicingLabel, padVoicing);
+    layoutCell (row1.removeFromLeft (inversionWidth), padInversionLabel, padInversionMode);
+    layoutCell (row1, padRegisterLabel, padRegister);
 
     auto layoutInline = [] (juce::Rectangle<int> cell, juce::Label& label,
                             juce::Component& control, int labelWidth)
@@ -1606,10 +1564,6 @@ void NdlrAudioProcessorEditor::layoutPadControls()
         label.setBounds (cell.removeFromLeft (juce::jmin (labelWidth, cell.getWidth() / 2)));
         control.setBounds (cell.reduced (1, 1));
     };
-    const auto row1CellWidth = row1.getWidth() / 3;
-    layoutInline (row1.removeFromLeft (row1CellWidth), padVelocityLabel, padVelocity, 56);
-    layoutInline (row1.removeFromLeft (row1CellWidth), padChannelLabel, padChannel, 42);
-    layoutInline (row1, padPolyLabel, padPolyChain, 34);
 
     area.removeFromTop (2);
     auto row2 = area.removeFromTop (27);
@@ -1617,15 +1571,16 @@ void NdlrAudioProcessorEditor::layoutPadControls()
     {
         return row2.removeFromLeft (juce::jmin (preferred, row2.getWidth()));
     };
-    padStrum.setBounds (takeWidth (80).reduced (2, 2));
-    layoutInline (takeWidth (115), padDivisionLabel, padStrumDivision, 27);
-    padGroup.setBounds (takeWidth (78).reduced (2, 2));
-    padInversionMode.setBounds (takeWidth (96).reduced (2, 2));
+    layoutInline (takeWidth (105), padVelocityLabel, padVelocity, 53);
+    layoutInline (takeWidth (88), padChannelLabel, padChannel, 38);
+    padStrum.setBounds (takeWidth (70).reduced (2, 2));
+    layoutInline (takeWidth (96), padDivisionLabel, padStrumDivision, 25);
+    padGroup.setBounds (takeWidth (70).reduced (2, 2));
     layoutInline (row2, padQuantizeLabel, padQuantize, 58);
 
-    for (auto* component : { static_cast<juce::Component*> (&padPosition),
-                             static_cast<juce::Component*> (&padRange),
-                             static_cast<juce::Component*> (&padOn),
+    for (auto* component : { static_cast<juce::Component*> (&padOn),
+                             static_cast<juce::Component*> (&padVoicing),
+                             static_cast<juce::Component*> (&padRegister),
                              static_cast<juce::Component*> (&padStrum),
                              static_cast<juce::Component*> (&padGroup),
                              static_cast<juce::Component*> (&padInversionMode) })
@@ -1889,17 +1844,20 @@ void NdlrAudioProcessorEditor::layoutLfoTabs()
 
 void NdlrAudioProcessorEditor::migrateToCompiledDefaultLayoutIfNeeded()
 {
-    // Une instance Standalone ou un projet de DAW peut contenir un ancien
-    // UILayout qui masque la ressource compilee. Cette version l'installe une
-    // seule fois ; les personnalisations faites ensuite restent prioritaires.
+    // Le layout compile sert uniquement de point de depart. Un UILayout deja
+    // sauvegarde appartient a l'utilisateur et ne doit jamais etre remplace
+    // parce qu'une nouvelle compilation change l'empreinte de la ressource.
     constexpr auto migrationProperty = "compiledDefaultLayoutVersion";
     constexpr auto fingerprintProperty = "compiledDefaultLayoutFingerprint";
     constexpr auto currentVersion = 4;
     auto& state = owner.getParameters().state;
     const auto compiledFingerprint = layoutDebugOverlay.getCompiledDefaultLayoutFingerprint();
-    if (compiledFingerprint.isNotEmpty()
-        && state.getProperty (fingerprintProperty).toString() == compiledFingerprint)
+    if (state.getChildWithName ("UILayout").isValid())
+    {
+        state.setProperty (migrationProperty, currentVersion, nullptr);
+        state.setProperty (fingerprintProperty, compiledFingerprint, nullptr);
         return;
+    }
 
     if (! layoutDebugOverlay.installCompiledDefaultLayout (state))
         return;
@@ -1917,7 +1875,7 @@ void NdlrAudioProcessorEditor::migrateToCompiledDefaultLayoutIfNeeded()
     state.setProperty ("motifSourceButtonsVersion", 1, nullptr);
     state.setProperty ("motifRegisterButtonsVersion", 1, nullptr);
     state.setProperty ("rhythmModeButtonsVersion", 1, nullptr);
-    state.setProperty ("padCompactVoicingLayoutVersion", 4, nullptr);
+    state.setProperty ("padCompactVoicingLayoutVersion", 5, nullptr);
     state.setProperty ("patternEditorInGeneratorsVersion", 1, nullptr);
     state.setProperty (migrationProperty, currentVersion, nullptr);
     state.setProperty (fingerprintProperty, compiledFingerprint, nullptr);
@@ -2237,11 +2195,10 @@ void NdlrAudioProcessorEditor::migrateRhythmModeButtonsIfNeeded()
 
 void NdlrAudioProcessorEditor::migratePadToCompactLayoutIfNeeded()
 {
-    // Remplace une seule fois la grille historique du Pad, puis installe la
-    // rangee des six choix Spread illustres. Les autres sections du layout
-    // personnalise restent intactes.
+    // Remplace une seule fois l'ancien layout Position/Range/Spread/Poly par
+    // les menus Voicing, Inversion et Register.
     constexpr auto migrationProperty = "padCompactVoicingLayoutVersion";
-    constexpr auto currentVersion = 4;
+    constexpr auto currentVersion = 5;
     auto& state = owner.getParameters().state;
     if (static_cast<int> (state.getProperty (migrationProperty, 0)) >= currentVersion)
         return;
@@ -2445,13 +2402,9 @@ void NdlrAudioProcessorEditor::timerCallback()
     showSourceButtons (motif1PatternTypeButtons, "motif1.patternType");
     showSourceButtons (motif2PatternTypeButtons, "motif2.patternType");
     showToggle (padOn, ndlr::modulation::padOn, "pad.on");
-    showSlider (padPosition, ndlr::modulation::padPosition, "pad.position");
-    showSlider (padRange, ndlr::modulation::padRange, "pad.range");
-    showSlider (padSpread, ndlr::modulation::padSpread, "pad.spread");
-    const auto visibleSpread = juce::jlimit (1, 6, juce::roundToInt (padSpread.getValue()));
-    for (auto index = 0; index < 6; ++index)
-        padSpreadButtons[static_cast<size_t> (index)].setToggleState (
-            index + 1 == visibleSpread, juce::dontSendNotification);
+    showCombo (padRegister, ndlr::modulation::padRegister, "pad.register");
+    showCombo (padInversionMode, ndlr::modulation::padInversion, "pad.inversionMode");
+    showCombo (padVoicing, ndlr::modulation::padVoicing, "pad.voicing");
     showCombo (padStrumDivision, ndlr::modulation::padStrum, "pad.strumDivision");
     showSlider (padVelocity, ndlr::modulation::padVelocity, "pad.velocity");
     showToggle (droneOn, ndlr::modulation::droneOn, "drone.on");
@@ -2784,30 +2737,13 @@ void NdlrAudioProcessorEditor::timerCallback()
         0
     };
     NdlrEngine::PadSettings previewPad;
-    previewPad.position = modValue (ndlr::modulation::padPosition,
-                                    rawInt ("pad.position"));
-    previewPad.range = modValue (ndlr::modulation::padRange,
-                                 rawInt ("pad.range"));
-    previewPad.spread = modValue (ndlr::modulation::padSpread,
-                                  rawInt ("pad.spread"));
-    previewPad.inversionMode = juce::jlimit (0, 3, rawInt ("pad.inversionMode"));
+    previewPad.voicing = modValue (ndlr::modulation::padVoicing,
+                                   rawInt ("pad.voicing"));
+    previewPad.inversion = modValue (ndlr::modulation::padInversion,
+                                     rawInt ("pad.inversionMode"));
+    previewPad.registerOctaves = modValue (ndlr::modulation::padRegister,
+                                           rawInt ("pad.register")) - 2;
     auto preview = NdlrEngine::calculatePadVoicing (previewHarmony, previewPad);
-    const auto previewTracksPreviousVoicing = padOn.getToggleState()
-        && engine.isTransportRunning();
-    if (previewPad.inversionMode == 1 || previewPad.inversionMode == 2)
-        preview.notes = NdlrEngine::rotatePadVoicing (
-            preview.notes, preview.noteCount, previewPad.inversionMode);
-    else if (previewPad.inversionMode == 3
-             && previewTracksPreviousVoicing && padPreviewNoteCount > 0)
-        preview.notes = NdlrEngine::minimisePadVoiceMovement (
-            preview.notes, preview.noteCount, padPreviewNotes, padPreviewNoteCount);
-    if (previewTracksPreviousVoicing)
-    {
-        padPreviewNotes = preview.notes;
-        padPreviewNoteCount = preview.noteCount;
-    }
-    else
-        padPreviewNoteCount = 0;
     static const std::array<juce::String, 12> keyNames {
         "C", "G", "D", "A", "E", "B", "F#", "Db", "Ab", "Eb", "Bb", "F"
     };
@@ -2820,16 +2756,15 @@ void NdlrAudioProcessorEditor::timerCallback()
     compactControls.enabled = padOn.getToggleState();
     compactControls.strum = padStrum.getToggleState();
     compactControls.group = padGroup.getToggleState();
-    compactControls.inversionMode = padInversionMode.getText();
+    compactControls.voicing = padVoicing.getText();
+    compactControls.inversion = padInversionMode.getText();
+    compactControls.registerOctaves = previewPad.registerOctaves;
     compactControls.velocity = modValue (ndlr::modulation::padVelocity,
                                          rawInt ("pad.velocity"));
     compactControls.midiChannel = rawInt ("pad.channel");
-    compactControls.polyChain = rawInt ("pad.polyChain");
     compactControls.strumDivision = padStrumDivision.getText();
     compactControls.quantize = padQuantize.getText();
-    padVoicingMiniView.setData (preview, previewPad.position,
-                                previewPad.range, previewPad.spread, harmonyName,
-                                std::move (compactControls));
+    padVoicingMiniView.setData (preview, harmonyName, std::move (compactControls));
 
     // Construction de la ligne BPM / transport / position courante de Motif 1.
     auto statusText = juce::String (engine.getTempo(), 1) + " BPM  |  "

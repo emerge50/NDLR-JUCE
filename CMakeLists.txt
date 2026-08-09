@@ -82,6 +82,7 @@ target_sources(NDLR PRIVATE
     Source/UI/PerlinDisplay.h
     Source/Engine/NdlrEngine.cpp
     Source/Engine/NdlrEngine.h
+    Source/Engine/HarmonyData.h
     Source/Engine/RhythmUtilities.h
     Source/Engine/TimingUtilities.h
     Source/Engine/PerlinNoise.h
@@ -110,6 +111,7 @@ if(BUILD_TESTING)
         Tests/NdlrTests.cpp
         Source/Engine/NdlrEngine.cpp
         Source/Engine/NdlrEngine.h
+        Source/Engine/HarmonyData.h
         Source/Engine/RhythmUtilities.h
         Source/Engine/TimingUtilities.h
     )

@@ -65,19 +65,12 @@ private:
     juce::Label dronePositionLabel, droneTypeLabel, droneTriggerLabel;
     juce::Label droneVelocityLabel, droneChannelLabel;
     juce::ToggleButton padOn { "ON" }, padStrum { "STRUM" }, padGroup { "GROUP" };
-    juce::ToggleButton padInvert;
-    juce::Slider padPosition, padRange, padSpread, padVelocity, padPolyChain;
-    juce::ComboBox padStrumDivision, padChannel, padQuantize, padInversionMode;
-    juce::Label padPositionLabel, padRangeLabel, padSpreadLabel, padVelocityLabel;
-    juce::Label padChannelLabel, padPolyLabel, padDivisionLabel, padQuantizeLabel;
+    juce::Slider padVelocity;
+    juce::ComboBox padVoicing, padInversionMode, padRegister;
+    juce::ComboBox padStrumDivision, padChannel, padQuantize;
+    juce::Label padVoicingLabel, padInversionLabel, padRegisterLabel, padVelocityLabel;
+    juce::Label padChannelLabel, padDivisionLabel, padQuantizeLabel;
     ndlr::ui::PadVoicingMiniView padVoicingMiniView;
-    std::array<int, 22> padPreviewNotes {};
-    int padPreviewNoteCount = 0;
-    std::array<ndlr::ui::PadSpreadButton, 6> padSpreadButtons {
-        ndlr::ui::PadSpreadButton { 1 }, ndlr::ui::PadSpreadButton { 2 },
-        ndlr::ui::PadSpreadButton { 3 }, ndlr::ui::PadSpreadButton { 4 },
-        ndlr::ui::PadSpreadButton { 5 }, ndlr::ui::PadSpreadButton { 6 }
-    };
     std::array<juce::ComboBox,3> modLfoShape, modLfoDivision;
     std::array<juce::ComboBox,3> modLfoMode, modLfoAmplitudeSource;
     std::array<juce::ComboBox,3> modLfoAmplitudeCcNumber, modLfoAmplitudeCcChannel;
@@ -204,9 +197,11 @@ private:
     std::unique_ptr<ComboAttachment> dronePositionAttachment, droneTypeAttachment;
     std::unique_ptr<ComboAttachment> droneTriggerAttachment, droneChannelAttachment;
     std::unique_ptr<SliderAttachment> droneVelocityAttachment;
-    std::unique_ptr<ButtonAttachment> padOnAttachment, padStrumAttachment, padGroupAttachment, padInvertAttachment;
-    std::unique_ptr<SliderAttachment> padPositionAttachment, padRangeAttachment, padSpreadAttachment, padVelocityAttachment, padPolyAttachment;
-    std::unique_ptr<ComboAttachment> padDivisionAttachment, padChannelAttachment, padQuantizeAttachment, padInversionModeAttachment;
+    std::unique_ptr<ButtonAttachment> padOnAttachment, padStrumAttachment, padGroupAttachment;
+    std::unique_ptr<SliderAttachment> padVelocityAttachment;
+    std::unique_ptr<ComboAttachment> padVoicingAttachment, padRegisterAttachment;
+    std::unique_ptr<ComboAttachment> padDivisionAttachment, padChannelAttachment;
+    std::unique_ptr<ComboAttachment> padQuantizeAttachment, padInversionModeAttachment;
     std::array<std::unique_ptr<ComboAttachment>,3> modLfoShapeAttachment, modLfoDivisionAttachment;
     std::array<std::unique_ptr<ComboAttachment>,3> modLfoAmplitudeSourceAttachment;
     std::array<std::unique_ptr<ComboAttachment>,3> modLfoAmplitudeCcNumberAttachment, modLfoAmplitudeCcChannelAttachment;

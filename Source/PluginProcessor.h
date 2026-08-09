@@ -12,7 +12,7 @@ enum Destination
 {
     none = 0,
     harmonyKey, harmonyMode, harmonyDegree, harmonyChordType,
-    padOn, padPosition, padRange, padSpread, padStrum, padVelocity,
+    padOn, padRegister, padInversion, padVoicing, padStrum, padVelocity,
     droneOn, dronePosition, droneType, droneTrigger, droneVelocity,
     motif1On, motif1Position, motif1Pattern, motif1ActivePattern, motif1Length, motif1Variation,
     motif1Division, motif1Velocity, motif1Gate, motif1Accent, motif1Rhythm,
@@ -166,16 +166,13 @@ private:
     std::atomic<float>* droneVelocity = nullptr;
     std::atomic<float>* droneChannel = nullptr;
     std::atomic<float>* padOn = nullptr;
-    std::atomic<float>* padPosition = nullptr;
-    std::atomic<float>* padRange = nullptr;
-    std::atomic<float>* padSpread = nullptr;
+    std::atomic<float>* padVoicing = nullptr;
+    std::atomic<float>* padRegister = nullptr;
     std::atomic<float>* padVelocity = nullptr;
     std::atomic<float>* padChannel = nullptr;
     std::atomic<float>* padStrum = nullptr;
     std::atomic<float>* padStrumDivision = nullptr;
     std::atomic<float>* padGroup = nullptr;
-    std::atomic<float>* padPolyChain = nullptr;
-    std::atomic<float>* padInvert = nullptr;
     std::atomic<float>* padInversionMode = nullptr;
     std::atomic<float>* padQuantize = nullptr;
     std::atomic<float>* perlinOn = nullptr;
